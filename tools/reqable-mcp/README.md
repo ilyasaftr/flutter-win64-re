@@ -17,7 +17,7 @@ go -C tools/reqable-mcp build -o ../../build/reqable-mcp .
 # -> build/reqable-mcp (arm64, ~5M, static, no deps)
 ```
 
-## Tools (73)
+## Tools (75)
 
 Full stock parity (46 tools, same names minus the `reqable__` prefix so
 both servers can coexist) plus 27 capture/analysis tools in the
@@ -55,6 +55,7 @@ object store), `script_get_config`, `script_set_enabled`, `script_get_by_id`,
 `collection_list`, `collection_create`, `collection_get`,
 `collection_delete`, `collection_update`, `collection_structure`,
 `collection_folder_create`, `collection_folder_get`,
+`collection_folder_update`, `collection_folder_delete`,
 `collection_api_create` (from curl), `collection_api_add`,
 `collection_api_get`, `collection_api_update`, `collection_api_delete`,
 `collection_api_generate_curl`.

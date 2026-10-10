@@ -15,6 +15,8 @@ func init() {
 	handlers["collection_structure"] = handleCollectionStructure
 	handlers["collection_folder_create"] = handleCollectionFolderCreate
 	handlers["collection_folder_get"] = handleCollectionFolderGet
+	handlers["collection_folder_update"] = handleCollectionFolderUpdate
+	handlers["collection_folder_delete"] = handleCollectionFolderDelete
 	handlers["collection_api_create"] = handleCollectionApiCreate
 	handlers["collection_api_add"] = handleCollectionApiAdd
 	handlers["collection_api_get"] = handleCollectionApiGet
@@ -119,6 +121,36 @@ func handleCollectionFolderGet(args map[string]any) (string, error) {
 		return "", err
 	}
 	return marshalPretty(ref), nil
+}
+
+func handleCollectionFolderUpdate(args map[string]any) (string, error) {
+	collectionID, id, err := reqColItem(args)
+	if err != nil {
+		return "", err
+	}
+	name := strArg(args, "name", "")
+	if name == "" {
+		return "", badArgs("name is required")
+	}
+	if err := store.CollectionFolderUpdate(ud(args), collectionID, id, name); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("folder %s renamed -> %s", id, restartNote), nil
+}
+
+func handleCollectionFolderDelete(args map[string]any) (string, error) {
+	collectionID, id, err := reqColItem(args)
+	if err != nil {
+		return "", err
+	}
+	found, err := store.CollectionFolderDelete(ud(args), collectionID, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", errors.New("folder " + id + " not found")
+	}
+	return fmt.Sprintf("folder %s deleted", id), nil
 }
 
 func handleCollectionApiCreate(args map[string]any) (string, error) {

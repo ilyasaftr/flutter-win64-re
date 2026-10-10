@@ -11,7 +11,7 @@ func def(name, desc string, schema map[string]any) toolDef {
 	return toolDef{Name: name, Description: desc, InputSchema: schema}
 }
 
-// toolDefs lists 73 tools.
+// toolDefs lists 75 tools.
 func toolDefs() []toolDef {
 	return []toolDef{
 		def("rewrite_list", "List Reqable rewrite rules (name, url, id).", obj(map[string]any{})),
@@ -66,6 +66,8 @@ func toolDefs() []toolDef {
 				"collectionId": str("Collection id"), "name": str("Folder name"), "parentId": str("Parent folder id"),
 			}, "collectionId", "name")),
 		def("collection_folder_get", "Get a folder ref by id within a collection.", obj(map[string]any{"collectionId": str("Collection id"), "id": str("Folder id")}, "collectionId", "id")),
+		def("collection_folder_update", "Rename a folder ref within a collection.", obj(map[string]any{"collectionId": str("Collection id"), "id": str("Folder id"), "name": str("New name")}, "collectionId", "id", "name")),
+		def("collection_folder_delete", "Delete a folder ref and its descendants within a collection.", obj(map[string]any{"collectionId": str("Collection id"), "id": str("Folder id")}, "collectionId", "id")),
 		def("collection_api_create", "Create an API in a collection from a curl command (sidecar for manual import).",
 			obj(map[string]any{
 				"collectionId": str("Collection id"), "curl": str("Curl command"), "parentId": str("Parent folder id"),

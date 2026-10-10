@@ -133,7 +133,59 @@ func CollectionFolderGet(userDir, collectionID, folderID string) (map[string]any
 	return out.(map[string]any), nil
 }
 
-// CollectionAPIGet returns the stored item ref (id/type); bodies live in Box.
+// CollectionFolderUpdate renames a folder ref within a collection.
+func CollectionFolderUpdate(userDir, collectionID, folderID, name string) error {
+	_, err := withCollection(userDir, collectionID, func(col map[string]any) (any, bool, error) {
+		ref, ok := findItem(collectionItems(col), folderID)
+		if !ok {
+			return nil, false, fmt.Errorf("folder %s not found in collection %s", folderID, collectionID)
+		}
+		if t, _ := ref["type"].(string); t != "folder" {
+			return nil, false, fmt.Errorf("item %s is not a folder", folderID)
+		}
+		ref["name"] = name
+		return nil, true, nil
+	})
+	return err
+}
+
+// CollectionFolderDelete removes a folder ref and its descendants (items
+// whose parentId chain leads to it); direct children would otherwise dangle.
+func CollectionFolderDelete(userDir, collectionID, folderID string) (bool, error) {
+	out, err := withCollection(userDir, collectionID, func(col map[string]any) (any, bool, error) {
+		items := collectionItems(col)
+		if _, ok := findItem(items, folderID); !ok {
+			return false, false, nil
+		}
+		doomed := map[string]bool{folderID: true}
+		for changed := true; changed; {
+			changed = false
+			for _, it := range items {
+				m, ok := it.(map[string]any)
+				if !ok || doomed[mapID(m)] {
+					continue
+				}
+				if p, _ := m["parentId"].(string); p != "" && doomed[p] {
+					doomed[mapID(m)] = true
+					changed = true
+				}
+			}
+		}
+		kept := make([]any, 0, len(items))
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok && doomed[mapID(m)] {
+				continue
+			}
+			kept = append(kept, it)
+		}
+		col["items"] = kept
+		return true, true, nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return out.(bool), nil
+}
 func CollectionAPIGet(userDir, collectionID, apiID string) (map[string]any, error) {
 	out, err := withCollection(userDir, collectionID, func(col map[string]any) (any, bool, error) {
 		ref, ok := findItem(collectionItems(col), apiID)
