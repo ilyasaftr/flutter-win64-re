@@ -72,11 +72,13 @@ the canonical bools are addressed as small offsets of `x22`
 ReqableMacHack/
   CMakeLists.txt     host-side build (macOS only) for the injector dylib
   inject.c           constructor dylib: dyld image lookup + masked scan + patch
+                     (handles late Flutter dlopen via _dyld_register_func_for_add_image)
   patch_core.h       scanner/patcher (also compiled into host-tools/verify)
 host-tools/
   verify.c           Linux/macOS CLI: scans a copy of the App binary, prints
                      hits, optionally writes a patched copy (static file patch)
 scripts/
+  resign.sh          helper: copy + ad-hoc re-sign so DYLD injection is not blocked
   lldb_find.py       lldb helper: find + inspect + patch the live function
   frida_find.js      Frida helper: find + inspect (+ patch) the live function
 ```
@@ -101,15 +103,25 @@ cmake --build build/ReqableMacHack --config Release
 ./build/host-verify App --write App.patched
 codesign -f -s - App.patched   # ad-hoc; real distribution needs proper signing
 
-# 2b. runtime patch test (no file modification)
+# 2b. runtime patch test (requires re-sign — hardened runtime blocks DYLD by default)
+#     App.framework is dlopened lazily by the Flutter engine, so the dylib
+#     registers a dyld add-image callback and patches on late load.
+./scripts/resign.sh /Applications/Reqable.app /tmp/ReqableDYLD.app
 DYLD_INSERT_LIBRARIES=$PWD/build/ReqableMacHack/libreqablemachack.dylib \
-  /Applications/Reqable.app/Contents/MacOS/Reqable
+  /tmp/ReqableDYLD.app/Contents/MacOS/Reqable
+# expect logs: "App.framework not yet loaded, registering dyld callback"
+#              "late load detected: .../App.framework/Versions/A/App"
+#              "scan ... -> 1 hit(s)" + "patch @ offset 0x346878 ... SUCCESS"
+#     For quick one-liner (ad-hoc deep re-sign):
+#       codesign --force --deep -s - /Applications/Reqable.app   # (keep a backup!)
 ```
 
 > SIP / hardened runtime: `DYLD_INSERT_LIBRARIES` is ignored for
-> hardened/signed apps unless you re-sign without library validation or run a
-> self-signed copy. The static-patch route (2a) is usually easier to test.
-> Always keep a backup of the original binary.
+> hardened/signed apps (`flags=0x10000(runtime)`) unless you re-sign without
+> hardening. Use `scripts/resign.sh` or `codesign --force --deep -s - <app>`
+> to produce an ad-hoc signed copy where DYLD is honored. The static-patch
+> route (2a) also needs `codesign -f -s -` after patching. Always keep a
+> backup of the original.
 
 ## Verify with lldb / Frida (on a Mac)
 
@@ -130,14 +142,18 @@ process — they report the new address and the exact bytes to refresh
 
 ## Porting notes (Windows -> macOS)
 
-- `version.dll` proxy -> DYLD insert dylib (`__attribute__((constructor))`).
-- `MemMonitor` anonymous-region watcher -> one-shot dyld `__text` scan
-  (plus an optional re-scan timer; kept simple here because the code is
-  file-backed and present before `main`).
-- `VirtualProtect` + `FlushInstructionCache` -> `vm_protect` (RW) /
+- `version.dll` proxy -> DYLD insert dylib (`__attribute__((constructor))` plus
+  `_dyld_register_func_for_add_image` because `App.framework` is dlopened
+  after `main` — straight constructor-time scan races the load).
+- `MemMonitor` anonymous-region watcher -> dyld late-load callback (Flutter
+  `App.framework` is file-backed `__TEXT`/`__text`, present via dyld after
+  `FlutterDartVM` start, not anonymous).
+- `VirtualProtect` + `FlushInstructionCache` -> `vm_protect` (RW, page-aligned) /
   `sys_icache_invalidate` + restore RX.
 - x64 patch (`49 8B 46 70 C3`, 5 bytes) -> ARM64 patch
   (`C0 82 00 91 C0 03 5F D6`, 8 bytes).
+- Hardened runtime: stock `Reqable.app` has `flags=0x10000(runtime)` so DYLD
+  injection is silently ignored — needs `codesign --force --deep -s -` copy.
 
 ## Disclaimer
 
