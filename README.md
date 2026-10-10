@@ -108,16 +108,29 @@ Flutter Framework、Dart Runtime 和自身业务代码混在同一套 AOT 代码
 │   ├── version_x64_jump.asm
 │   └── version_x64_jump.S
 │
-└── ReqableHack/
-    ├── CMakeLists.txt
-    ├── MemMonitor.cpp
-    ├── MemMonitor.h
-    ├── MemoryKit.cpp
-    ├── MemoryKit.h
-    ├── version.def
-    ├── version_x64.c
-    ├── version_x64_jump.asm
-    └── version_x64_jump.S
+├── ReqableHack/
+│   ├── CMakeLists.txt
+│   ├── MemMonitor.cpp
+│   ├── MemMonitor.h
+│   ├── MemoryKit.cpp
+│   ├── MemoryKit.h
+│   ├── version.def
+│   ├── version_x64.c
+│   ├── version_x64_jump.asm
+│   └── version_x64_jump.S
+│
+├── ReqableMacHack/            # macOS ARM64 port of ReqableHack (macos branch)
+│   ├── CMakeLists.txt
+│   ├── README.md
+│   ├── inject.c
+│   └── patch_core.h
+│
+├── host-tools/                # portable offline verifier / static patcher
+│   └── verify.c
+│
+└── scripts/                   # lldb + Frida find/patch helpers (Mac)
+    ├── lldb_find.py
+    └── frida_find.js
 ```
 
 ### RiveHack
@@ -131,6 +144,26 @@ Rive 的目标 Dart AOT Code Region 在 `version.dll` 加载时尚未出现。
 Reqable 在创建新的窗口后还会出现新的 Dart AOT Code Region，所以启动时只扫描一次并不够。
 
 为此加入了 `MemMonitor`，持续检测新出现的候选 Region，并交给 `MemoryKit` 做 Pattern Scan 和 Patch。
+
+### ReqableMacHack（`macos` 分支）
+
+Windows `ReqableHack` 的 macOS ARM64 移植（详见 `ReqableMacHack/README.md`）。
+
+macOS 上 Dart AOT 代码是文件回写（`App.framework` 的 `__text`，`kDartIsolateSnapshotInstructions`），
+不是匿名 Region，因此不需要 `MemMonitor`：通过 `DYLD_INSERT_LIBRARIES` 注入 dylib，
+用 dyld 定位 `App` 镜像并对 `__text` 做一次 masked pattern scan，然后把目标函数入口改写为 unconditional `return true`。
+
+Windows 目标（`app.so` file offset `0xe2795c`）的 ARM64 同源函数位于 `App` file offset `0x34a878`（Reqable macOS arm64 3.2.23，Flutter/Dart 3.3.4）：
+
+- 相同结构：`bl; [x0,#7]; cmp pool; b.eq; [x1,#0x2f]; cmp x22; b.eq; [x15]=; bl; tbnz w0,#4`
+- 相同字段偏移 `+0x2f`，相同 Smi bit-test（x64 `test al,0x10` ↔ ARM64 `tbnz w0,#4`）
+- fallthrough 返回 `x22+0x20`（true），taken 返回 `x22+0x30`（对应 x64 `[r14+0x70]` / `[r14+0x78]`）
+- masked scan 在 16MB `__text` 中恰好命中 1 次；两边直接调用者都是 **142** 个
+
+Patch（8 bytes，覆盖函数入口）：`C0 82 00 91 C0 03 5F D6`（`add x0,x22,#0x20; ret`）。
+
+`host-tools/verify.c` 可在 Linux/macOS 下离线验证（二进制拷贝）：命中 1 次则 exit 0，并可用 `--write` 写静态 patched 拷贝（运行前需重签名）。
+`scripts/lldb_find.py`（`reqfind`/`reqpatch`）与 `scripts/frida_find.js`（`find()`/`patch()`）用于在真机 Mac 上确认/更新 pattern。
 
 ### DartPPDumper.lua
 
