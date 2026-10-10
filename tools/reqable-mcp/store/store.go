@@ -6,6 +6,8 @@ package store
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -55,7 +57,7 @@ func UserDir() (string, error) {
 	return best, nil
 }
 
-func load(path string, v any) error {
+func loadFile(path string, v any) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -67,9 +69,9 @@ func load(path string, v any) error {
 	return nil
 }
 
-// save writes atomically (tmp + rename) so a crash cannot leave a half
-// written config behind.
-func save(path string, v any) error {
+// saveFile writes atomically (tmp + rename) so a crash cannot leave a
+// half written config behind.
+func saveFile(path string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -92,3 +94,27 @@ func BreakpointPath(userDir string) string {
 func CollectionsPath(userDir string) string {
 	return filepath.Join(userDir, "rest", "collections")
 }
+
+// NewUUID returns a random v4 UUID string, stdlib only.
+func NewUUID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	h := hex.EncodeToString(b[:])
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:], nil
+}
+
+func mustUUID() string {
+	id, err := NewUUID()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "reqable-mcp:", err)
+		os.Exit(1)
+	}
+	return id
+}
+
+func boolPtr(b bool) *bool { return &b }
+func intPtr(i int) *int    { return &i }

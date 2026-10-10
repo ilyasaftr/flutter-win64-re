@@ -8,35 +8,30 @@ import (
 
 // GetRewriteByID returns the rewrite rule with the given id.
 func GetRewriteByID(userDir, id string) (RewriteEntry, error) {
-	var cfg RewriteFile
-	if err := load(RewritePath(userDir), &cfg); err != nil {
+	f, err := loadRewrites(userDir)
+	if err != nil {
 		return RewriteEntry{}, err
 	}
-	for _, e := range cfg.Rewrites {
-		if e.ID == id {
-			return e, nil
-		}
-	}
-	return RewriteEntry{}, fmt.Errorf("rewrite %s not found", id)
+	return GetByID(f.Items, "rewrite", id, rewriteID)
 }
 
 // UpdateRewrite replaces the rule matching e.ID in full.
 func UpdateRewrite(userDir string, e RewriteEntry) error {
-	var cfg RewriteFile
-	if err := load(RewritePath(userDir), &cfg); err != nil {
+	f, err := loadRewrites(userDir)
+	if err != nil {
 		return err
 	}
-	for i, cur := range cfg.Rewrites {
-		if cur.ID == e.ID {
-			cfg.Rewrites[i] = e
-			return save(RewritePath(userDir), cfg)
-		}
+	i := indexByID(f.Items, e.ID, rewriteID)
+	if i < 0 {
+		return fmt.Errorf("rewrite %s not found", e.ID)
 	}
-	return fmt.Errorf("rewrite %s not found", e.ID)
+	f.Items[i] = e
+	return saveRewrites(userDir, f)
 }
 
 // rewriteEntryRaw mirrors RewriteEntry with an opaque action so any
-// action shape round-trips without loss.
+// action shape round-trips without loss. Field order matches the app's
+// layout so re-saves keep key order stable.
 type rewriteEntryRaw struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
@@ -47,106 +42,80 @@ type rewriteEntryRaw struct {
 	IsEnabled bool            `json:"isEnabled"`
 }
 
-type rewriteFileRaw struct {
-	Rewrites  []rewriteEntryRaw `json:"rewrites"`
-	IsEnabled bool              `json:"isEnabled"`
-}
+func rawRewriteID(e rewriteEntryRaw) string { return e.ID }
 
 // UpdateRewriteRaw replaces a rule while accepting any action shape.
 func UpdateRewriteRaw(userDir, id, name, method, url string, wildcard, isEnabled bool, action json.RawMessage) error {
-	var cfg rewriteFileRaw
-	if err := load(RewritePath(userDir), &cfg); err != nil {
+	f, err := loadFolder[rewriteEntryRaw](RewritePath(userDir), "rewrites")
+	if err != nil {
 		return err
 	}
-	for i, cur := range cfg.Rewrites {
-		if cur.ID == id {
-			cfg.Rewrites[i] = rewriteEntryRaw{
-				ID: id, Name: name, Method: method, URL: url,
-				Wildcard: wildcard, Action: action, IsEnabled: isEnabled,
-			}
-			return save(RewritePath(userDir), cfg)
-		}
+	i := indexByID(f.Items, id, rawRewriteID)
+	if i < 0 {
+		return fmt.Errorf("rewrite %s not found", id)
 	}
-	return fmt.Errorf("rewrite %s not found", id)
+	f.Items[i] = rewriteEntryRaw{
+		ID: id, Name: name, Method: method, URL: url,
+		Wildcard: wildcard, Action: action, IsEnabled: isEnabled,
+	}
+	return saveFolder(RewritePath(userDir), "rewrites", f)
 }
 
 // SetRewriteEnabled toggles the top-level rewrite switch.
 func SetRewriteEnabled(userDir string, enabled bool) error {
-	var cfg RewriteFile
-	if err := load(RewritePath(userDir), &cfg); err != nil {
-		return err
-	}
-	cfg.IsEnabled = enabled
-	return save(RewritePath(userDir), cfg)
+	return SetEnabled(RewritePath(userDir), "rewrites", enabled)
 }
 
 // SetRewriteItemEnabled toggles a single rule.
 func SetRewriteItemEnabled(userDir, id string, enabled bool) error {
-	var cfg RewriteFile
-	if err := load(RewritePath(userDir), &cfg); err != nil {
+	f, err := loadRewrites(userDir)
+	if err != nil {
 		return err
 	}
-	for i, cur := range cfg.Rewrites {
-		if cur.ID == id {
-			cfg.Rewrites[i].IsEnabled = enabled
-			return save(RewritePath(userDir), cfg)
-		}
+	if err := SetItemEnabled(f.Items, "rewrite", id, enabled, rewriteID, setRewriteOn); err != nil {
+		return err
 	}
-	return fmt.Errorf("rewrite %s not found", id)
+	return saveRewrites(userDir, f)
 }
 
 // GetBreakpointByID returns the breakpoint with the given id.
 func GetBreakpointByID(userDir, id string) (BreakpointEntry, error) {
-	var cfg BreakpointFile
-	if err := load(BreakpointPath(userDir), &cfg); err != nil {
+	f, err := loadBreakpoints(userDir)
+	if err != nil {
 		return BreakpointEntry{}, err
 	}
-	for _, e := range cfg.Breakpoints {
-		if e.ID == id {
-			return e, nil
-		}
-	}
-	return BreakpointEntry{}, fmt.Errorf("breakpoint %s not found", id)
+	return GetByID(f.Items, "breakpoint", id, breakpointID)
 }
 
 // UpdateBreakpoint replaces the breakpoint matching e.ID in full.
 func UpdateBreakpoint(userDir string, e BreakpointEntry) error {
-	var cfg BreakpointFile
-	if err := load(BreakpointPath(userDir), &cfg); err != nil {
+	f, err := loadBreakpoints(userDir)
+	if err != nil {
 		return err
 	}
-	for i, cur := range cfg.Breakpoints {
-		if cur.ID == e.ID {
-			cfg.Breakpoints[i] = e
-			return save(BreakpointPath(userDir), cfg)
-		}
+	i := indexByID(f.Items, e.ID, breakpointID)
+	if i < 0 {
+		return fmt.Errorf("breakpoint %s not found", e.ID)
 	}
-	return fmt.Errorf("breakpoint %s not found", e.ID)
+	f.Items[i] = e
+	return saveBreakpoints(userDir, f)
 }
 
 // SetBreakpointEnabled toggles the top-level breakpoint switch.
 func SetBreakpointEnabled(userDir string, enabled bool) error {
-	var cfg BreakpointFile
-	if err := load(BreakpointPath(userDir), &cfg); err != nil {
-		return err
-	}
-	cfg.IsEnabled = enabled
-	return save(BreakpointPath(userDir), cfg)
+	return SetEnabled(BreakpointPath(userDir), "breakpoints", enabled)
 }
 
 // SetBreakpointItemEnabled toggles a single breakpoint.
 func SetBreakpointItemEnabled(userDir, id string, enabled bool) error {
-	var cfg BreakpointFile
-	if err := load(BreakpointPath(userDir), &cfg); err != nil {
+	f, err := loadBreakpoints(userDir)
+	if err != nil {
 		return err
 	}
-	for i, cur := range cfg.Breakpoints {
-		if cur.ID == id {
-			cfg.Breakpoints[i].IsEnabled = enabled
-			return save(BreakpointPath(userDir), cfg)
-		}
+	if err := SetItemEnabled(f.Items, "breakpoint", id, enabled, breakpointID, setBreakpointOn); err != nil {
+		return err
 	}
-	return fmt.Errorf("breakpoint %s not found", id)
+	return saveBreakpoints(userDir, f)
 }
 
 // No capture_script config file exists; scripts persist in Box LMDB.
