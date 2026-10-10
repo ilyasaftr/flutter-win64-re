@@ -81,6 +81,10 @@ scripts/
   resign.sh          helper: copy + ad-hoc re-sign so DYLD injection is not blocked
   lldb_find.py       lldb helper: find + inspect + patch the live function
   frida_find.js      Frida helper: find + inspect (+ patch) the live function
+  frida_login_trace.js   catch the MCP-write login gate: hook send/write,
+                         filter "requires an account", print App backtrace
+  frida_login_watch.js   heap-scan the login literal -> pool-slot scan ->
+                         lldb read-watchpoint recipe to trap the handler
 ```
 
 ## Build the dylib (on a Mac)
@@ -139,6 +143,42 @@ If a future Reqable update moves the function, the masked scan prints
 `patch FAILED` (dylib) / `hits: 0`: re-run the finder scripts on the live
 process — they report the new address and the exact bytes to refresh
 `kPattern`/`kPatch` with.
+
+## MCP writes still demand login (analysis + hunt recipe)
+
+The MCP server itself is clean: it is open source
+(`reqable/reqable-mcp-server`) and only forwards the app local-API error
+body (`ReqableHttpException.message = json['message']`). The gate is in
+`App`: all 65 write ops have a `"…requires an account, please login…"`
+literal (plus 65 premium literals already covered by the `0x34a878` patch).
+Static hunt results so far (macOS arm64 3.2.23):
+
+- No second shared bool getter with ~142 callers exists (only the premium
+  twin at `0x34a878`); the login check is not a shape twin of it.
+- No dominant shared callee adjacent to the premium call in the 142
+  handlers (before/after 40-insn windows) — so no shared login helper call.
+- Small handlers (e.g. `0x6aa1a4`) contain no inline login check either,
+  so the gate sits deeper (per-module helper or the local-API dispatcher).
+- Only `App.framework/.../App` contains the literals (no native `.dylib`).
+
+Fastest way to finish it on a Mac (~minutes, with the resigned copy):
+
+```sh
+# 1. socket backtrace: catches the error response + handler frames
+frida -p $(pgrep -x Reqable) -l scripts/frida_login_trace.js
+# trigger any MCP write while logged OUT, read App fileoffs from the trace,
+# disassemble the handler around them.
+
+# 2. heap -> pool-slot -> watchpoint: traps the exact loader
+frida -p $(pgrep -x Reqable) -l scripts/frida_login_watch.js
+# note the printed pool slot, then in lldb:
+#   watchpoint set expression -s 8 -- <slot>
+#   c   # trigger MCP write while logged out
+#   bt; disassemble -s $pc -c 60
+```
+
+Then add it as a second masked entry in `patch_core.h` exactly like the
+premium twin (same `add x0,x22,#0x20; ret` shape if it is a bool gate).
 
 ## Porting notes (Windows -> macOS)
 
